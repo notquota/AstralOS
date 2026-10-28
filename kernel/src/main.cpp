@@ -2,119 +2,104 @@
 #include <stdint.h>
 
 // ==================================================
-// AstralOS v0.0.6-alpha
+// AstralOS v0.0.7-alpha
 // Main Kernel Entry
 // Architecture: x86-64
 // Bootloader: Limine
 // ==================================================
 
-// ----------------------------------------------
 // Boot information
-// ----------------------------------------------
-
 #include "boot/boot_info.h"
 
-// ----------------------------------------------
 // CPU / architecture
-// ----------------------------------------------
-
 #include "arch/x86_64/cpu.h"
 #include "arch/x86_64/idt.h"
 #include "arch/x86_64/lowlevel.h"
 
-// ----------------------------------------------
 // Graphics
-// ----------------------------------------------
-
 #include "graphics/framebuffer.h"
 #include "graphics/console.h"
 #include "graphics/theme.h"
 #include "graphics/loading_screen.h"
 
-// ----------------------------------------------
 // Logging
-// ----------------------------------------------
-
 #include "logging/serial.h"
 
-// ----------------------------------------------
 // Memory
-// ----------------------------------------------
-
 #include "memory/physical.h"
 #include "memory/backend.h"
 
-// ----------------------------------------------
 // Hardware
-// ----------------------------------------------
-
 #include "hardware/pci.h"
 
-// ----------------------------------------------
-// Drivers
-// ----------------------------------------------
-
+// Input drivers
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
-#include "drivers/manager.h"
 
-// ----------------------------------------------
-// System configuration
-// ----------------------------------------------
-
+// Configuration
 #include "config/settings.h"
 
-// ----------------------------------------------
 // AstralFS
-// ----------------------------------------------
-
 #include "filesystem/vfs.h"
 
-// ----------------------------------------------
 // Terminal
-// ----------------------------------------------
-
 #include "terminal/terminal.h"
 
-// ----------------------------------------------
-// System
-// ----------------------------------------------
+// Desktop
+#include "desktop/desktop.h"
+#include "desktop/preferences.h"
 
+// System
 #include "system/panic.h"
 #include "system/driver_runtime.h"
 
 using namespace Astral;
 
 // ==================================================
-// AstralOS Boot State
+// Boot Configuration
 // ==================================================
 
 namespace {
 
+// Development-only switch.
+//
+// TRUE:
+//   Loading screen -> Desktop -> Terminal
+//
+// FALSE:
+//   Loading screen -> Terminal
+//
+// This bypasses graphical-session authentication
+// and must only be used for development in a VM.
+constexpr bool DESKTOP_BOOT_TEST = false;
+
+constexpr uint32_t STARTUP_TASKS = 9;
+
 struct BootState {
-    bool cpuReady;
-    bool framebufferReady;
-    bool physicalMemoryReady;
-    bool physicalMemoryTestReady;
+    bool cpuReady = false;
+    bool framebufferReady = false;
 
-    bool keyboardReady;
-    bool mouseReady;
+    bool physicalMemoryReady = false;
+    bool memoryTestReady = false;
 
-    bool configurationReady;
-    bool filesystemReady;
+    bool keyboardReady = false;
+    bool mouseReady = false;
 
-    bool pciReady;
-    bool driverRuntimeReady;
+    bool configurationReady = false;
+    bool filesystemReady = false;
 
-    bool memoryBackendReady;
-    bool networkReady;
+    bool pciReady = false;
+    bool driverRuntimeReady = false;
+
+    bool memoryBackendReady = false;
+    bool networkReady = false;
+
+    bool desktopReady = false;
 };
 
 static BootState bootState{};
 
-constexpr uint32_t STARTUP_TASKS = 9;
-
-} // namespace
+}
 
 // ==================================================
 // Early Kernel Halt
@@ -176,30 +161,6 @@ static bool test_memory() {
 }
 
 // ==================================================
-// CPU Initialization
-// ==================================================
-
-static bool initialize_cpu() {
-    CPU::initialize_idt();
-
-    Serial::write(
-        "[CPU] Exception IDT installed\n"
-    );
-
-    if (!CPU::supports_long_mode()) {
-        Serial::write(
-            "[CPU] Long mode unsupported\n"
-        );
-
-        return false;
-    }
-
-    bootState.cpuReady = true;
-
-    return true;
-}
-
-// ==================================================
 // Physical Memory Initialization
 // ==================================================
 
@@ -240,7 +201,7 @@ static bool initialize_input() {
         "[INPUT] PS/2 keyboard initialized\n"
     );
 
-    // Mouse initialization is optional.
+    // Mouse is optional.
     bootState.mouseReady =
         Mouse::initialize();
 
@@ -258,7 +219,7 @@ static bool initialize_input() {
 }
 
 // ==================================================
-// PCI / Driver Initialization
+// PCI / Hardware Driver Discovery
 // ==================================================
 
 static bool initialize_hardware() {
@@ -281,36 +242,31 @@ static bool initialize_hardware() {
         "[HARDWARE] PCI initialized\n"
     );
 
-    // The memory backend must be initialized
-    // with safe page-table mappings and a
-    // reserved DMA region before starting
-    // any bus-mastering driver.
+    // Do not invent a DMA memory mapping.
+    //
+    // The paging / memory bootstrap must
+    // install a valid backend separately.
     bootState.memoryBackendReady =
         MemoryBackend::initialized();
 
     if (!bootState.memoryBackendReady) {
         Serial::write(
-            "[HARDWARE] DMA/MMIO backend not ready\n"
+            "[HARDWARE] MMIO/DMA backend unavailable\n"
         );
 
         Serial::write(
-            "[HARDWARE] Using detection-only mode\n"
+            "[HARDWARE] Detection-only boot mode\n"
         );
     }
 
-    // Transaction ID zero disables DHCP
-    // startup for the first safe integration.
-    //
-    // The driver manager can still detect
-    // PCI devices and initialize supported
-    // hardware probes when their prerequisites
-    // are available.
+    // DHCP remains disabled for this first
+    // graphical Desktop boot test.
     bootState.driverRuntimeReady =
         DriverRuntime::initialize(0);
 
     if (!bootState.driverRuntimeReady) {
         Serial::write(
-            "[WARNING] Driver runtime failed\n"
+            "[WARNING] Driver runtime unavailable\n"
         );
 
         return false;
@@ -356,11 +312,74 @@ static bool initialize_hardware() {
         );
     } else {
         Serial::write(
-            "[NETWORK] Network unavailable or disabled\n"
+            "[NETWORK] Networking unavailable\n"
         );
     }
 
     return true;
+}
+
+// ==================================================
+// Desktop Preferences
+// ==================================================
+
+static void initialize_desktop() {
+    // Desktop is initially disabled.
+    //
+    // Once AstralFS supports persistent config,
+    // load saved desktop preferences here.
+    Desktop::initialize_preferences({
+        false,
+        Desktop::BootMode::Terminal
+    });
+
+    bootState.desktopReady = true;
+
+    Serial::write(
+        "[DESKTOP] Desktop subsystem configured\n"
+    );
+}
+
+// ==================================================
+// Desktop Development Boot Test
+// ==================================================
+
+static void launch_desktop_test() {
+    if (!DESKTOP_BOOT_TEST)
+        return;
+
+    if (!bootState.desktopReady)
+        return;
+
+    if (Graphics::width() < 800 ||
+        Graphics::height() < 600) {
+        Serial::write(
+            "[DESKTOP] Display resolution too small\n"
+        );
+
+        return;
+    }
+
+    Serial::write(
+        "[DESKTOP] Starting development session\n"
+    );
+
+    // Enable for the current boot only.
+    // This does NOT save a boot preference.
+    Desktop::enable();
+
+    // The session returns when the user
+    // exits Desktop using Escape or launcher.
+    Desktop::run();
+
+    Serial::write(
+        "[DESKTOP] Graphical session ended\n"
+    );
+
+    // Restore terminal graphics after the
+    // Desktop has occupied the framebuffer.
+    Console::initialize();
+    Console::scroll_to_bottom();
 }
 
 // ==================================================
@@ -379,9 +398,9 @@ void kernel_main(BootInfo* bootInfo) {
     Serial::write(
         "\n"
         "========================================\n"
-        " AstralOS v0.0.6-alpha\n"
+        " AstralOS v0.0.7-alpha\n"
         " Architecture: x86-64\n"
-        " Kernel startup initiated\n"
+        " Graphical Desktop development\n"
         "========================================\n"
     );
 
@@ -392,7 +411,7 @@ void kernel_main(BootInfo* bootInfo) {
     }
 
     // ------------------------------------------
-    // Stage 1: CPU exception handling
+    // Stage 1: CPU exceptions
     // ------------------------------------------
 
     CPU::initialize_idt();
@@ -421,7 +440,7 @@ void kernel_main(BootInfo* bootInfo) {
     );
 
     // ------------------------------------------
-    // Stage 3: Graphical loading screen
+    // Stage 3: Loading screen
     // ------------------------------------------
 
     Loading::begin(STARTUP_TASKS);
@@ -437,7 +456,7 @@ void kernel_main(BootInfo* bootInfo) {
     );
 
     // ------------------------------------------
-    // Stage 4: CPU verification
+    // Stage 4: CPU capability check
     // ------------------------------------------
 
     bootState.cpuReady =
@@ -455,11 +474,11 @@ void kernel_main(BootInfo* bootInfo) {
     }
 
     Serial::write(
-        "[BOOT] CPU capability verification passed\n"
+        "[BOOT] CPU verification passed\n"
     );
 
     // ------------------------------------------
-    // Stage 5: Physical memory allocator
+    // Stage 5: Physical memory
     // ------------------------------------------
 
     const bool memoryReady =
@@ -477,18 +496,18 @@ void kernel_main(BootInfo* bootInfo) {
     }
 
     // ------------------------------------------
-    // Stage 6: Physical allocation test
+    // Stage 6: Memory allocation test
     // ------------------------------------------
 
-    bootState.physicalMemoryTestReady =
+    bootState.memoryTestReady =
         test_memory();
 
     Loading::complete(
         "Physical memory verification",
-        bootState.physicalMemoryTestReady
+        bootState.memoryTestReady
     );
 
-    if (!bootState.physicalMemoryTestReady) {
+    if (!bootState.memoryTestReady) {
         kernel_panic(
             "PHYSICAL MEMORY TEST FAILED"
         );
@@ -502,17 +521,17 @@ void kernel_main(BootInfo* bootInfo) {
 
     bootState.configurationReady = true;
 
-    Serial::write(
-        "[CONFIG] System settings initialized\n"
-    );
-
     Loading::complete(
         "System configuration",
         true
     );
 
+    Serial::write(
+        "[CONFIG] System settings initialized\n"
+    );
+
     // ------------------------------------------
-    // Stage 8: PS/2 input drivers
+    // Stage 8: Keyboard / mouse
     // ------------------------------------------
 
     const bool inputReady =
@@ -554,8 +573,6 @@ void kernel_main(BootInfo* bootInfo) {
     const bool hardwareReady =
         initialize_hardware();
 
-    // PCI discovery is optional for the
-    // terminal-focused first boot.
     Loading::complete(
         "Hardware driver discovery",
         hardwareReady
@@ -568,12 +585,18 @@ void kernel_main(BootInfo* bootInfo) {
     }
 
     // ------------------------------------------
-    // Stage 11: Finish loading screen
+    // Stage 11: Desktop subsystem
     // ------------------------------------------
 
+    initialize_desktop();
+
     Serial::write(
-        "[BOOT] Completing startup screen\n"
+        "[DESKTOP] Desktop initialized\n"
     );
+
+    // ------------------------------------------
+    // Stage 12: Finish loading
+    // ------------------------------------------
 
     if (!Loading::finish()) {
         kernel_panic(
@@ -586,7 +609,7 @@ void kernel_main(BootInfo* bootInfo) {
     );
 
     // ------------------------------------------
-    // Stage 12: Console
+    // Stage 13: Console
     // ------------------------------------------
 
     Console::initialize();
@@ -596,30 +619,30 @@ void kernel_main(BootInfo* bootInfo) {
     );
 
     // ------------------------------------------
-    // Stage 13: Terminal
+    // Stage 14: Desktop or terminal
+    // ------------------------------------------
+
+    if (DESKTOP_BOOT_TEST) {
+        launch_desktop_test();
+    }
+
+    // ------------------------------------------
+    // Stage 15: Existing terminal
     // ------------------------------------------
 
     Serial::write(
         "[TERMINAL] Starting AstralOS terminal\n"
     );
 
-    // Terminal::run() preserves:
-    //
-    // - First-boot root account creation
+    // Preserve:
+    // - Root account creation
     // - Root authentication
     // - HPT / User terminal modes
-    // - AstralOS native commands
     // - ast commands
-    // - AstralFS navigation and file operations
-    // - System Settings wizard entry
-    //
-    // Terminal::run() normally never returns.
+    // - AstralFS
+    // - System Settings
 
     Terminal::run();
-
-    // ------------------------------------------
-    // Unexpected terminal exit
-    // ------------------------------------------
 
     early_halt(
         "Terminal subsystem returned unexpectedly"

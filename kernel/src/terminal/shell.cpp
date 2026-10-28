@@ -3,7 +3,6 @@
 #include "terminal.h"
 #include "commands.h"
 
-
 #include "../config/wizard.h"
 
 #include "../graphics/console.h"
@@ -13,13 +12,18 @@
 #include "../security/account.h"
 #include "../filesystem/vfs.h"
 
+// AstralOS Desktop
+#include "../desktop/desktop.h"
+#include "../desktop/preferences.h"
+#include "../desktop/commands.h"
+
 #include <stdint.h>
 
 namespace Astral::Shell {
 
-// ================================================
+// ==================================================
 // Console utilities
-// ================================================
+// ==================================================
 
 static void print(
     const char* text,
@@ -36,9 +40,9 @@ static void println(
     Console::newline();
 }
 
-// ================================================
+// ==================================================
 // String utilities
-// ================================================
+// ==================================================
 
 static bool equals(
     const char* a,
@@ -77,15 +81,15 @@ static bool starts(
 }
 
 static const char* skip_spaces(const char* text) {
-    while (*text == ' ')
+    while (*text == ' ' || *text == '\t')
         ++text;
 
     return text;
 }
 
-// ================================================
+// ==================================================
 // Keyboard input
-// ================================================
+// ==================================================
 
 static void read_line(
     char* buffer,
@@ -138,9 +142,9 @@ static void read_line(
     }
 }
 
-// ================================================
+// ==================================================
 // Password handling
-// ================================================
+// ==================================================
 
 static void erase_secret(
     char* buffer,
@@ -163,7 +167,7 @@ static bool authenticate() {
         true
     );
 
-    bool valid =
+    const bool valid =
         Security::authenticate_root(password);
 
     erase_secret(password, sizeof(password));
@@ -178,9 +182,9 @@ static bool authenticate() {
     return valid;
 }
 
-// ================================================
+// ==================================================
 // First-run account setup
-// ================================================
+// ==================================================
 
 static void account_setup() {
     Console::initialize();
@@ -240,7 +244,11 @@ static void account_setup() {
                     password
                 );
 
-            erase_secret(password, sizeof(password));
+            erase_secret(
+                password,
+                sizeof(password)
+            );
+
             erase_secret(
                 confirmation,
                 sizeof(confirmation)
@@ -265,21 +273,24 @@ static void account_setup() {
     println("ROOT LOGIN", Theme::DOWNLOAD);
 
     while (!authenticate()) {
-        println("Please try again", Theme::WARNING);
+        println(
+            "Please try again",
+            Theme::WARNING
+        );
     }
 
     Terminal::set_mode(Terminal::Mode::HPT);
 }
 
-// ================================================
+// ==================================================
 // Terminal display
-// ================================================
+// ==================================================
 
 static void heading() {
     Console::initialize();
 
     println(
-        "AstralOS v0.0.5-alpha",
+        "AstralOS v0.0.7-alpha",
         Theme::TEXT
     );
 
@@ -311,12 +322,16 @@ static void heading() {
         "Type help or ast help for commands."
     );
 
+    println(
+        "Desktop: ast desktop enable / show / status"
+    );
+
     Console::newline();
 }
 
-// ================================================
+// ==================================================
 // Terminal mode switching
-// ================================================
+// ==================================================
 
 static void switch_user() {
     if (VFS::initialized()) {
@@ -365,9 +380,133 @@ static void switch_hpt() {
     );
 }
 
-// ================================================
+// ==================================================
+// Desktop status
+// ==================================================
+
+static void desktop_status() {
+    const Desktop::Preferences& prefs =
+        Desktop::preferences();
+
+    Console::newline();
+
+    println(
+        "ASTRALOS DESKTOP",
+        Theme::DOWNLOAD
+    );
+
+    println(
+        prefs.enabled
+            ? "Status: Enabled"
+            : "Status: Disabled",
+        prefs.enabled
+            ? Theme::SUCCESS
+            : Theme::WARNING
+    );
+
+    println(
+        prefs.bootMode == Desktop::BootMode::Desktop
+            ? "Boot interface: Desktop"
+            : "Boot interface: Terminal"
+    );
+
+    println("Version: 0.0.7-alpha");
+    Console::newline();
+}
+
+// ==================================================
+// Desktop command handling
+// ==================================================
+
+static void desktop_command(
+    const char* command,
+    bool privileged
+) {
+    if (!command || !*command) {
+        println(
+            "Usage: ast desktop enable|disable|show|status",
+            Theme::WARNING
+        );
+        return;
+    }
+
+    if (equals(command, "status")) {
+        desktop_status();
+        return;
+    }
+
+    const Desktop::CommandAction action =
+        Desktop::execute_command(
+            command,
+            privileged
+        );
+
+    if (action.result !=
+        Desktop::CommandResult::Success) {
+
+        println(
+            Desktop::command_message(action.result),
+            Theme::ERROR
+        );
+
+        return;
+    }
+
+    if (equals(command, "enable")) {
+        println(
+            "Desktop enabled.",
+            Theme::SUCCESS
+        );
+        return;
+    }
+
+    if (equals(command, "disable")) {
+        println(
+            "Desktop disabled.",
+            Theme::SUCCESS
+        );
+        return;
+    }
+
+    if (equals(command, "show boot")) {
+        println(
+            "Desktop boot preference saved.",
+            Theme::SUCCESS
+        );
+        return;
+    }
+
+    if (equals(command, "show terminal")) {
+        println(
+            "Terminal boot preference saved.",
+            Theme::SUCCESS
+        );
+        return;
+    }
+
+    if (action.launchDesktop) {
+        println(
+            "Starting AstralOS Desktop...",
+            Theme::SUCCESS
+        );
+
+        // Desktop::run() owns the graphical
+        // event loop until the user exits.
+        Desktop::run();
+
+        // Restore the terminal framebuffer.
+        heading();
+
+        println(
+            "Returned to AstralOS Terminal.",
+            Theme::SUCCESS
+        );
+    }
+}
+
+// ==================================================
 // Command processing
-// ================================================
+// ==================================================
 
 static void process(const char* input) {
     if (!input)
@@ -420,10 +559,25 @@ static void process(const char* input) {
     // --------------------------------------------
 
     if (equals(input, "config")) {
-        // Configuration is currently user-accessible.
-        // Future system-wide actions can require HPT.
-        Astral::ConfigWizard::open();
+        ConfigWizard::open();
         return;
+    }
+
+    // --------------------------------------------
+    // Desktop command detection
+    // --------------------------------------------
+
+    bool isDesktopCommand = false;
+    const char* desktopArgument = nullptr;
+
+    if (astralCommand) {
+        if (equals(input, "desktop")) {
+            isDesktopCommand = true;
+            desktopArgument = "";
+        } else if (starts(input, "desktop ")) {
+            isDesktopCommand = true;
+            desktopArgument = skip_spaces(input + 8);
+        }
     }
 
     // --------------------------------------------
@@ -432,6 +586,7 @@ static void process(const char* input) {
 
     if (!astralCommand &&
         !Commands::is_native(input)) {
+
         println(
             "Unknown command. Type help.",
             Theme::ERROR
@@ -446,7 +601,9 @@ static void process(const char* input) {
     bool privileged =
         Terminal::is_privileged();
 
-    // sudo elevates one command after authentication.
+    // sudo elevates ONE command only.
+    // It must authenticate through the
+    // existing root account system.
     if (sudoRequested && !privileged) {
         if (!authenticate())
             return;
@@ -455,7 +612,19 @@ static void process(const char* input) {
     }
 
     // --------------------------------------------
-    // Command dispatch
+    // Desktop command dispatch
+    // --------------------------------------------
+
+    if (isDesktopCommand) {
+        desktop_command(
+            desktopArgument,
+            privileged
+        );
+        return;
+    }
+
+    // --------------------------------------------
+    // Existing command dispatch
     // --------------------------------------------
 
     if (astralCommand) {
@@ -471,9 +640,9 @@ static void process(const char* input) {
     }
 }
 
-// ================================================
+// ==================================================
 // Dynamic filesystem prompt
-// ================================================
+// ==================================================
 
 static void prompt() {
     char path[VFS::MAX_PATH]{};
@@ -488,9 +657,11 @@ static void prompt() {
         path[1] = '\0';
     }
 
-    // Username / privilege mode.
     if (Terminal::is_privileged()) {
-        print("root", Theme::DOWNLOAD);
+        print(
+            "root",
+            Theme::DOWNLOAD
+        );
     } else {
         print(
             Security::device_owner(),
@@ -498,9 +669,11 @@ static void prompt() {
         );
     }
 
-    print("@astral", Theme::DOWNLOAD);
+    print(
+        "@astral",
+        Theme::DOWNLOAD
+    );
 
-    // Display the final component of the path.
     const char* folder = path;
 
     for (const char* p = path; *p; ++p) {
@@ -513,17 +686,22 @@ static void prompt() {
     if (!(path[0] == '/' && path[1] == '\0'))
         print(folder, Theme::TEXT);
 
-    // Root mode uses #; user mode uses $.
     if (Terminal::is_privileged()) {
-        print(" # ", Theme::SUCCESS);
+        print(
+            " # ",
+            Theme::SUCCESS
+        );
     } else {
-        print(" $ ", Theme::SUCCESS);
+        print(
+            " $ ",
+            Theme::SUCCESS
+        );
     }
 }
 
-// ================================================
+// ==================================================
 // Main shell
-// ================================================
+// ==================================================
 
 [[noreturn]]
 void run() {

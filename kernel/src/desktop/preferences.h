@@ -1,5 +1,6 @@
 
 #pragma once
+
 #include <stdint.h>
 
 namespace Astral::Desktop {
@@ -14,8 +15,6 @@ struct Preferences {
     BootMode bootMode;
 };
 
-// The persistence backend should atomically save
-// both settings and report whether it succeeded.
 using SavePreferences = bool (*)(
     const Preferences& preferences
 );
@@ -31,7 +30,6 @@ const Preferences& preferences();
 bool enable();
 bool disable();
 
-// Requires a working persistent save callback.
 bool set_boot_mode(BootMode mode);
 
 bool can_launch();
