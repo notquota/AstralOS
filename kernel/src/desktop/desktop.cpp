@@ -1,448 +1,188 @@
 
 #include "desktop.h"
-#include "preferences.h"
 
-#include "../graphics/framebuffer.h"
-#include "../graphics/font.h"
-#include "../graphics/cursor_pixels.h"
+#include "core/desktop_manager.h"
+#include "core/events.h"
+#include "core/session_controller.h"
 
-#include "../drivers/mouse.h"
 #include "../drivers/keyboard.h"
-
+#include "../drivers/mouse.h"
 #include "../arch/x86_64/lowlevel.h"
-
-#include <stdint.h>
 
 namespace Astral::Desktop {
 
-static constexpr uint32_t BG = 0x0B1120;
-static constexpr uint32_t PANEL = 0x17243B;
-static constexpr uint32_t TASKBAR = 0x101C30;
-static constexpr uint32_t SELECTED = 0x263C5F;
-static constexpr uint32_t TEXT = 0xEDF2FF;
-static constexpr uint32_t MUTED = 0xA4B3CC;
-static constexpr uint32_t ACCENT = 0xA78BFA;
+namespace {
 
-static bool active = false;
-static bool launcherOpen = false;
-static bool windowOpen = false;
+uint32_t displayWidth = 0;
+uint32_t displayHeight = 0;
 
-static int32_t windowX = 120;
-static int32_t windowY = 110;
+bool desktopActive = false;
 
-static uint32_t screenW = 0;
-static uint32_t screenH = 0;
-
-static void rect(
+void send_mouse_event(
+    Events::Type type,
     int32_t x,
     int32_t y,
+    int32_t value = 0
+) {
+    Events::Event event{};
+
+    event.type = type;
+    event.x = x;
+    event.y = y;
+    event.value = value;
+
+    DesktopManager::dispatch(event);
+}
+
+void send_keyboard_event(char character) {
+    Events::Event event{};
+
+    event.type = Events::Type::KeyDown;
+    event.value =
+        static_cast<unsigned char>(character);
+
+    DesktopManager::dispatch(event);
+}
+
+} // namespace
+
+void set_display_size(
     uint32_t width,
-    uint32_t height,
-    uint32_t color
+    uint32_t height
 ) {
-    if (x < 0 || y < 0)
-        return;
-
-    if (static_cast<uint64_t>(x) + width > screenW ||
-        static_cast<uint64_t>(y) + height > screenH)
-        return;
-
-    Graphics::rectangle(
-        static_cast<uint32_t>(x),
-        static_cast<uint32_t>(y),
-        width,
-        height,
-        color
-    );
-}
-
-static void text(
-    int32_t x,
-    int32_t y,
-    const char* message,
-    uint32_t color,
-    uint32_t scale = 1
-) {
-    if (!message)
-        return;
-
-    while (*message) {
-        const uint8_t* glyph =
-            Graphics::glyph(*message++);
-
-        for (uint32_t row = 0; row < 7; ++row) {
-            for (uint32_t col = 0; col < 5; ++col) {
-                if (!(glyph[row] & (1u << (4 - col))))
-                    continue;
-
-                rect(
-                    x + static_cast<int32_t>(col * scale),
-                    y + static_cast<int32_t>(row * scale),
-                    scale, scale, color
-                );
-            }
-        }
-
-        x += static_cast<int32_t>(6 * scale);
-    }
-}
-
-static bool inside(
-    int32_t mx,
-    int32_t my,
-    int32_t x,
-    int32_t y,
-    int32_t w,
-    int32_t h
-) {
-    return mx >= x && my >= y &&
-           mx < x + w && my < y + h;
-}
-
-static void draw_wallpaper() {
-    Graphics::clear(BG);
-
-    rect(
-        0, 0,
-        screenW, 5,
-        ACCENT
-    );
-
-    const int32_t titleX =
-        static_cast<int32_t>(screenW / 2) - 108;
-
-    const int32_t titleY =
-        static_cast<int32_t>(screenH / 2) - 40;
-
-    text(
-        titleX,
-        titleY,
-        "ASTRAL",
-        0x435A80,
-        5
-    );
-
-    text(
-        titleX + 16,
-        titleY + 48,
-        "AstralOS Desktop",
-        MUTED
-    );
-}
-
-static void draw_taskbar() {
-    const int32_t y =
-        static_cast<int32_t>(screenH) - 50;
-
-    rect(0, y, screenW, 50, TASKBAR);
-
-    rect(10, y + 8, 112, 34, SELECTED);
-
-    rect(10, y + 8, 4, 34, ACCENT);
-
-    text(
-        26,
-        y + 21,
-        "AstralOS",
-        TEXT
-    );
-
-    if (windowOpen) {
-        rect(136, y + 8, 125, 34, SELECTED);
-        text(
-            147,
-            y + 21,
-            "Welcome",
-            TEXT
-        );
-    }
-
-    text(
-        static_cast<int32_t>(screenW) - 133,
-        y + 21,
-        "v0.0.7-alpha",
-        MUTED
-    );
-}
-
-static void draw_window() {
-    if (!windowOpen)
-        return;
-
-    rect(
-        windowX + 5,
-        windowY + 6,
-        390, 240,
-        0x080D18
-    );
-
-    rect(
-        windowX,
-        windowY,
-        390, 240,
-        PANEL
-    );
-
-    rect(
-        windowX,
-        windowY,
-        390, 38,
-        SELECTED
-    );
-
-    rect(
-        windowX,
-        windowY,
-        4, 38,
-        ACCENT
-    );
-
-    text(
-        windowX + 16,
-        windowY + 15,
-        "Welcome to AstralOS",
-        TEXT
-    );
-
-    rect(
-        windowX + 351,
-        windowY + 7,
-        29, 24,
-        0x7F344A
-    );
-
-    text(
-        windowX + 362,
-        windowY + 16,
-        "X",
-        TEXT
-    );
-
-    text(
-        windowX + 24,
-        windowY + 75,
-        "AstralOS graphical shell",
-        TEXT,
-        2
-    );
-
-    text(
-        windowX + 24,
-        windowY + 114,
-        "Desktop v0.0.7-alpha",
-        ACCENT
-    );
-
-    text(
-        windowX + 24,
-        windowY + 139,
-        "Kernel and terminal remain native.",
-        MUTED
-    );
-
-    text(
-        windowX + 24,
-        windowY + 166,
-        "Open the launcher for actions.",
-        MUTED
-    );
-}
-
-static void draw_launcher() {
-    if (!launcherOpen)
-        return;
-
-    const int32_t y =
-        static_cast<int32_t>(screenH) - 365;
-
-    rect(
-        10, y,
-        265, 305,
-        PANEL
-    );
-
-    rect(
-        10, y,
-        265, 44,
-        SELECTED
-    );
-
-    text(
-        27,
-        y + 17,
-        "AstralOS Launcher",
-        TEXT,
-        2
-    );
-
-    rect(22, y + 62, 241, 43, SELECTED);
-    text(38, y + 79, "Welcome", TEXT);
-
-    rect(22, y + 115, 241, 43, SELECTED);
-    text(38, y + 132, "Return to Terminal", TEXT);
-
-    text(
-        28, y + 244,
-        "More applications coming soon.",
-        MUTED
-    );
-}
-
-static void draw_cursor() {
-    if (!Mouse::initialized())
-        return;
-
-    const int32_t px = Mouse::x();
-    const int32_t py = Mouse::y();
-
-    for (uint32_t y = 0;
-         y < Assets::CURSOR_HEIGHT;
-         ++y) {
-
-        for (uint32_t x = 0;
-             x < Assets::CURSOR_WIDTH;
-             ++x) {
-
-            const uint32_t pixel =
-                Assets::CURSOR_RGBA[
-                    y * Assets::CURSOR_WIDTH + x
-                ];
-
-            if ((pixel & 0xFF) < 128)
-                continue;
-
-            rect(
-                px + static_cast<int32_t>(x),
-                py + static_cast<int32_t>(y),
-                1, 1,
-                pixel >> 8
-            );
-        }
-    }
-}
-
-static void render() {
-    draw_wallpaper();
-    draw_window();
-    draw_launcher();
-    draw_taskbar();
-    draw_cursor();
-}
-
-static void handle_click() {
-    const int32_t mx = Mouse::x();
-    const int32_t my = Mouse::y();
-
-    const int32_t barY =
-        static_cast<int32_t>(screenH) - 50;
-
-    if (inside(mx, my, 10, barY + 8, 112, 34)) {
-        launcherOpen = !launcherOpen;
-        return;
-    }
-
-    if (launcherOpen) {
-        const int32_t menuY =
-            static_cast<int32_t>(screenH) - 365;
-
-        if (inside(
-            mx, my,
-            22, menuY + 62,
-            241, 43
-        )) {
-            windowOpen = true;
-            launcherOpen = false;
-            return;
-        }
-
-        if (inside(
-            mx, my,
-            22, menuY + 115,
-            241, 43
-        )) {
-            active = false;
-            return;
-        }
-
-        launcherOpen = false;
-    }
-
-    if (windowOpen &&
-        inside(
-            mx, my,
-            windowX + 351,
-            windowY + 7,
-            29, 24
-        )) {
-        windowOpen = false;
-    }
+    displayWidth = width;
+    displayHeight = height;
 }
 
 bool running() {
-    return active;
+    return desktopActive;
 }
 
 void run() {
-    if (!can_launch())
+    if (desktopActive)
         return;
 
-    if (active)
+    // We can't render into a framebuffer
+    // that apparently doesn't exist. Rude.
+    if (displayWidth == 0 ||
+        displayHeight == 0)
         return;
 
-    screenW = Graphics::width();
-    screenH = Graphics::height();
-
-    if (screenW < 800 || screenH < 600)
+    // The user must already be authenticated.
+    // No free HPT privileges with your wallpaper.
+    if (!SessionController::can_run_apps())
         return;
 
-    active = true;
-    launcherOpen = false;
-    windowOpen = true;
+    DesktopManager::Configuration config{};
 
-    windowX =
-        static_cast<int32_t>(screenW / 2) - 195;
+    config.screenWidth = displayWidth;
+    config.screenHeight = displayHeight;
 
-    windowY =
-        static_cast<int32_t>(screenH / 2) - 150;
+    if (!DesktopManager::initialize(config))
+        return;
 
+    if (!DesktopManager::start())
+        return;
+
+    desktopActive = true;
+
+    // Mouse belongs to the GUI for now.
     Mouse::set_ui_capture(true);
 
-    uint64_t lastMouseRevision =
+    uint64_t previousMouseRevision =
         Mouse::revision();
 
-    render();
+    int32_t previousMouseX = Mouse::x();
+    int32_t previousMouseY = Mouse::y();
 
-    while (active) {
-        const char key = Keyboard::read_char();
+    DesktopManager::invalidate();
+    DesktopManager::render();
 
-        // Escape exits Desktop for now.
-        if (key == 27) {
-            active = false;
-            break;
+    // The new Desktop lives here.
+    // The old drawing loop has been evicted.
+    while (
+        DesktopManager::status() !=
+        DesktopManager::Status::Stopped
+    ) {
+        bool activity = false;
+
+        const uint64_t revision =
+            Mouse::revision();
+
+        const int32_t currentX = Mouse::x();
+        const int32_t currentY = Mouse::y();
+
+        if (revision != previousMouseRevision ||
+            currentX != previousMouseX ||
+            currentY != previousMouseY) {
+
+            previousMouseRevision = revision;
+            previousMouseX = currentX;
+            previousMouseY = currentY;
+
+            send_mouse_event(
+                Events::Type::MouseMove,
+                currentX,
+                currentY
+            );
+
+            activity = true;
         }
 
         if (Mouse::take_left_click()) {
-            handle_click();
-            render();
+            // Current driver exposes click events,
+            // not a proper held/released mouse state.
+            // So dragging still needs driver work.
+            send_mouse_event(
+                Events::Type::MouseDown,
+                currentX,
+                currentY
+            );
+
+            send_mouse_event(
+                Events::Type::MouseUp,
+                currentX,
+                currentY
+            );
+
+            activity = true;
         }
 
-        if (Mouse::revision() != lastMouseRevision) {
-            lastMouseRevision = Mouse::revision();
-            render();
+        const int32_t wheel =
+            Mouse::take_scroll();
+
+        if (wheel != 0) {
+            send_mouse_event(
+                Events::Type::MouseWheel,
+                currentX,
+                currentY,
+                wheel
+            );
+
+            activity = true;
         }
 
-        // Consume wheel events while the Desktop
-        // has exclusive pointer control.
-        Mouse::take_scroll();
+        const char character =
+            Keyboard::read_char();
 
-        astral_pause();
+        if (character != '\0') {
+            send_keyboard_event(character);
+            activity = true;
+        }
+
+        DesktopManager::pump();
+        DesktopManager::render();
+
+        if (!activity) {
+            // No need to cook the CPU just because
+            // somebody is admiring their wallpaper.
+            astral_pause();
+        }
     }
 
     Mouse::set_ui_capture(false);
 
-    // Do not render terminal here. The existing
-    // terminal subsystem should restore its own
-    // console state when the session returns.
+    desktopActive = false;
 }
 
-}
+} // namespace Astral::Desktop

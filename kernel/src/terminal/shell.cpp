@@ -2,37 +2,31 @@
 #include "shell.h"
 #include "terminal.h"
 #include "commands.h"
-
 #include "../config/wizard.h"
-
 #include "../graphics/console.h"
 #include "../graphics/theme.h"
-
 #include "../drivers/keyboard.h"
 #include "../security/account.h"
 #include "../filesystem/vfs.h"
-
-// AstralOS Desktop
 #include "../desktop/desktop.h"
 #include "../desktop/preferences.h"
 #include "../desktop/commands.h"
-
+#include "../desktop/core/session_controller.h"
 #include <stdint.h>
 
 namespace Astral::Shell {
 
-// ==================================================
-// Console utilities
-// ==================================================
+namespace {
 
-static void print(
+// It goes here. Don't ask.
+void print(
     const char* text,
     uint32_t color = Theme::TEXT
 ) {
     Console::write(text, color);
 }
 
-static void println(
+void println(
     const char* text,
     uint32_t color = Theme::TEXT
 ) {
@@ -40,11 +34,8 @@ static void println(
     Console::newline();
 }
 
-// ==================================================
-// String utilities
-// ==================================================
-
-static bool equals(
+// Two strings enter. One answer leaves.
+bool equals(
     const char* a,
     const char* b
 ) {
@@ -62,7 +53,8 @@ static bool equals(
     return *a == '\0' && *b == '\0';
 }
 
-static bool starts(
+// The beginning knows.
+bool starts(
     const char* text,
     const char* prefix
 ) {
@@ -80,18 +72,18 @@ static bool starts(
     return true;
 }
 
-static const char* skip_spaces(const char* text) {
+const char* skip_spaces(const char* text) {
+    if (!text)
+        return "";
+
     while (*text == ' ' || *text == '\t')
         ++text;
 
     return text;
 }
 
-// ==================================================
-// Keyboard input
-// ==================================================
-
-static void read_line(
+// The keyboard has opinions.
+void read_line(
     char* buffer,
     uint32_t capacity,
     bool hidden = false
@@ -142,21 +134,23 @@ static void read_line(
     }
 }
 
-// ==================================================
-// Password handling
-// ==================================================
-
-static void erase_secret(
+// Leave nothing behind.
+// Well, ideally.
+void erase_secret(
     char* buffer,
     uint32_t capacity
 ) {
+    if (!buffer)
+        return;
+
     volatile char* data = buffer;
 
     for (uint32_t i = 0; i < capacity; ++i)
         data[i] = '\0';
 }
 
-static bool authenticate() {
+// The door.
+bool authenticate() {
     char password[64]{};
 
     print("Root password: ", Theme::WARNING);
@@ -170,7 +164,10 @@ static bool authenticate() {
     const bool valid =
         Security::authenticate_root(password);
 
-    erase_secret(password, sizeof(password));
+    erase_secret(
+        password,
+        sizeof(password)
+    );
 
     if (!valid) {
         println(
@@ -182,11 +179,9 @@ static bool authenticate() {
     return valid;
 }
 
-// ==================================================
-// First-run account setup
-// ==================================================
-
-static void account_setup() {
+// First contact.
+// The machine has no memories yet.
+void account_setup() {
     Console::initialize();
 
     println(
@@ -217,17 +212,32 @@ static void account_setup() {
         char confirmation[64]{};
 
         while (true) {
-            print("Owner: ", Theme::DOWNLOAD);
-            read_line(owner, sizeof(owner));
+            print(
+                "Owner: ",
+                Theme::DOWNLOAD
+            );
 
-            print("Password: ", Theme::WARNING);
+            read_line(
+                owner,
+                sizeof(owner)
+            );
+
+            print(
+                "Password: ",
+                Theme::WARNING
+            );
+
             read_line(
                 password,
                 sizeof(password),
                 true
             );
 
-            print("Confirm: ", Theme::WARNING);
+            print(
+                "Confirm: ",
+                Theme::WARNING
+            );
+
             read_line(
                 confirmation,
                 sizeof(confirmation),
@@ -259,6 +269,7 @@ static void account_setup() {
                     "Root account created",
                     Theme::SUCCESS
                 );
+
                 break;
             }
 
@@ -270,8 +281,14 @@ static void account_setup() {
     }
 
     Console::newline();
-    println("ROOT LOGIN", Theme::DOWNLOAD);
 
+    println(
+        "ROOT LOGIN",
+        Theme::DOWNLOAD
+    );
+
+    // Keep asking until the actual account
+    // system says yes. No other witnesses.
     while (!authenticate()) {
         println(
             "Please try again",
@@ -279,18 +296,37 @@ static void account_setup() {
         );
     }
 
-    Terminal::set_mode(Terminal::Mode::HPT);
+    // The password has been verified.
+    // The second door may now exist.
+    //
+    // This starts the graphical user session.
+    // It does not give Desktop apps HPT powers.
+    const bool desktopSessionReady =
+        Desktop::SessionController::start_authenticated(
+            0,
+            "root"
+        );
+
+    if (!desktopSessionReady) {
+        println(
+            "Warning: graphical session unavailable",
+            Theme::WARNING
+        );
+    }
+
+    // HPT is still controlled by the terminal.
+    // Different keys, different basement.
+    Terminal::set_mode(
+        Terminal::Mode::HPT
+    );
 }
 
-// ==================================================
-// Terminal display
-// ==================================================
-
-static void heading() {
+// Same face. Different hat.
+void heading() {
     Console::initialize();
 
     println(
-        "AstralOS v0.0.7-alpha",
+        "AstralOS v0.0.8-alpha",
         Theme::TEXT
     );
 
@@ -329,11 +365,8 @@ static void heading() {
     Console::newline();
 }
 
-// ==================================================
-// Terminal mode switching
-// ==================================================
-
-static void switch_user() {
+// Lower floor.
+void switch_user() {
     if (VFS::initialized()) {
         VFS::change_directory(
             "/home/user",
@@ -341,7 +374,9 @@ static void switch_user() {
         );
     }
 
-    Terminal::set_mode(Terminal::Mode::User);
+    Terminal::set_mode(
+        Terminal::Mode::User
+    );
 
     heading();
 
@@ -351,19 +386,23 @@ static void switch_user() {
     );
 }
 
-static void switch_hpt() {
+// Upper floor. Someone checks the stairs.
+void switch_hpt() {
     if (Terminal::is_privileged()) {
         println(
             "Already in HPT Terminal",
             Theme::SUCCESS
         );
+
         return;
     }
 
     if (!authenticate())
         return;
 
-    Terminal::set_mode(Terminal::Mode::HPT);
+    Terminal::set_mode(
+        Terminal::Mode::HPT
+    );
 
     if (VFS::initialized()) {
         VFS::change_directory(
@@ -380,11 +419,8 @@ static void switch_hpt() {
     );
 }
 
-// ==================================================
-// Desktop status
-// ==================================================
-
-static void desktop_status() {
+// The little status oracle.
+void desktop_status() {
     const Desktop::Preferences& prefs =
         Desktop::preferences();
 
@@ -410,15 +446,13 @@ static void desktop_status() {
             : "Boot interface: Terminal"
     );
 
-    println("Version: 0.0.7-alpha");
+    println("Version: 0.0.8-alpha");
+
     Console::newline();
 }
 
-// ==================================================
-// Desktop command handling
-// ==================================================
-
-static void desktop_command(
+// The passage.
+void desktop_command(
     const char* command,
     bool privileged
 ) {
@@ -427,6 +461,7 @@ static void desktop_command(
             "Usage: ast desktop enable|disable|show|status",
             Theme::WARNING
         );
+
         return;
     }
 
@@ -457,6 +492,7 @@ static void desktop_command(
             "Desktop enabled.",
             Theme::SUCCESS
         );
+
         return;
     }
 
@@ -465,6 +501,7 @@ static void desktop_command(
             "Desktop disabled.",
             Theme::SUCCESS
         );
+
         return;
     }
 
@@ -473,6 +510,7 @@ static void desktop_command(
             "Desktop boot preference saved.",
             Theme::SUCCESS
         );
+
         return;
     }
 
@@ -481,20 +519,33 @@ static void desktop_command(
             "Terminal boot preference saved.",
             Theme::SUCCESS
         );
+
         return;
     }
 
     if (action.launchDesktop) {
+        // Permission to open the door is not
+        // the same thing as being inside.
+        if (!Desktop::SessionController::can_run_apps()) {
+            println(
+                "Desktop session unavailable or locked.",
+                Theme::ERROR
+            );
+
+            return;
+        }
+
         println(
             "Starting AstralOS Desktop...",
             Theme::SUCCESS
         );
 
-        // Desktop::run() owns the graphical
-        // event loop until the user exits.
+        // This is the new GUI entry point.
+        // Whatever happened here before is gone.
         Desktop::run();
 
-        // Restore the terminal framebuffer.
+        // Rebuild the terminal view when GUI returns.
+        // The screen remembers nothing. Convenient.
         heading();
 
         println(
@@ -504,11 +555,8 @@ static void desktop_command(
     }
 }
 
-// ==================================================
-// Command processing
-// ==================================================
-
-static void process(const char* input) {
+// The command maze.
+void process(const char* input) {
     if (!input)
         return;
 
@@ -520,13 +568,11 @@ static void process(const char* input) {
     bool sudoRequested = false;
     bool astralCommand = false;
 
-    // Optional sudo prefix.
     if (starts(input, "sudo ")) {
         sudoRequested = true;
         input = skip_spaces(input + 5);
     }
 
-    // Check for AstralOS command prefix.
     if (equals(input, "ast")) {
         Commands::show_help();
         return;
@@ -540,32 +586,23 @@ static void process(const char* input) {
     if (!*input)
         return;
 
-    // --------------------------------------------
-    // Terminal mode transitions
-    // --------------------------------------------
-
+    // One direction.
     if (astralCommand && equals(input, "user")) {
         switch_user();
         return;
     }
 
+    // The other direction.
     if (astralCommand && equals(input, "hpt")) {
         switch_hpt();
         return;
     }
 
-    // --------------------------------------------
-    // Graphical configuration wizard
-    // --------------------------------------------
-
+    // A separate hallway.
     if (equals(input, "config")) {
         ConfigWizard::open();
         return;
     }
-
-    // --------------------------------------------
-    // Desktop command detection
-    // --------------------------------------------
 
     bool isDesktopCommand = false;
     const char* desktopArgument = nullptr;
@@ -580,10 +617,6 @@ static void process(const char* input) {
         }
     }
 
-    // --------------------------------------------
-    // Native command validation
-    // --------------------------------------------
-
     if (!astralCommand &&
         !Commands::is_native(input)) {
 
@@ -591,19 +624,15 @@ static void process(const char* input) {
             "Unknown command. Type help.",
             Theme::ERROR
         );
+
         return;
     }
-
-    // --------------------------------------------
-    // Privilege handling
-    // --------------------------------------------
 
     bool privileged =
         Terminal::is_privileged();
 
-    // sudo elevates ONE command only.
-    // It must authenticate through the
-    // existing root account system.
+    // Temporary authority.
+    // Expires when this command stops being interesting.
     if (sudoRequested && !privileged) {
         if (!authenticate())
             return;
@@ -611,22 +640,16 @@ static void process(const char* input) {
         privileged = true;
     }
 
-    // --------------------------------------------
-    // Desktop command dispatch
-    // --------------------------------------------
-
     if (isDesktopCommand) {
         desktop_command(
             desktopArgument,
             privileged
         );
+
         return;
     }
 
-    // --------------------------------------------
-    // Existing command dispatch
-    // --------------------------------------------
-
+    // The old machinery still lives here.
     if (astralCommand) {
         Commands::execute(
             input,
@@ -640,11 +663,8 @@ static void process(const char* input) {
     }
 }
 
-// ==================================================
-// Dynamic filesystem prompt
-// ==================================================
-
-static void prompt() {
+// The prompt follows you.
+void prompt() {
     char path[VFS::MAX_PATH]{};
 
     if (VFS::initialized()) {
@@ -681,10 +701,17 @@ static void prompt() {
             folder = p + 1;
     }
 
-    print("/", Theme::TEXT);
+    print(
+        "/",
+        Theme::TEXT
+    );
 
-    if (!(path[0] == '/' && path[1] == '\0'))
-        print(folder, Theme::TEXT);
+    if (!(path[0] == '/' && path[1] == '\0')) {
+        print(
+            folder,
+            Theme::TEXT
+        );
+    }
 
     if (Terminal::is_privileged()) {
         print(
@@ -699,15 +726,13 @@ static void prompt() {
     }
 }
 
-// ==================================================
-// Main shell
-// ==================================================
+} // namespace
 
+// The endless room.
 [[noreturn]]
 void run() {
     account_setup();
 
-    // Start the HPT session in /root.
     if (VFS::initialized()) {
         VFS::change_directory(
             "/root",
@@ -727,10 +752,9 @@ void run() {
             sizeof(input)
         );
 
-        if (input[0] != '\0') {
+        if (input[0] != '\0')
             process(input);
-        }
     }
 }
 
-}
+} // namespace Astral::Shell

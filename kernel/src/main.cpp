@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 // ==================================================
-// AstralOS v0.0.7-alpha
+// AstralOS v0.0.8-alpha
 // Main Kernel Entry
 // Architecture: x86-64
 // Bootloader: Limine
@@ -48,6 +48,7 @@
 // Desktop
 #include "desktop/desktop.h"
 #include "desktop/preferences.h"
+#include "desktop/core/session_controller.h"
 
 // System
 #include "system/panic.h"
@@ -69,8 +70,8 @@ namespace {
 // FALSE:
 //   Loading screen -> Terminal
 //
-// This bypasses graphical-session authentication
-// and must only be used for development in a VM.
+// Leave this false for regular boot.
+// A desktop wallpaper is not an authentication method.
 constexpr bool DESKTOP_BOOT_TEST = false;
 
 constexpr uint32_t STARTUP_TASKS = 9;
@@ -202,6 +203,7 @@ static bool initialize_input() {
     );
 
     // Mouse is optional.
+    // The keyboard does the heavy lifting anyway.
     bootState.mouseReady =
         Mouse::initialize();
 
@@ -243,9 +245,7 @@ static bool initialize_hardware() {
     );
 
     // Do not invent a DMA memory mapping.
-    //
-    // The paging / memory bootstrap must
-    // install a valid backend separately.
+    // Fake memory backends tend to have real consequences.
     bootState.memoryBackendReady =
         MemoryBackend::initialized();
 
@@ -259,8 +259,8 @@ static bool initialize_hardware() {
         );
     }
 
-    // DHCP remains disabled for this first
-    // graphical Desktop boot test.
+    // DHCP is still disabled at boot.
+    // Networking can have its own existential crisis later.
     bootState.driverRuntimeReady =
         DriverRuntime::initialize(0);
 
@@ -320,14 +320,23 @@ static bool initialize_hardware() {
 }
 
 // ==================================================
-// Desktop Preferences
+// Desktop Preferences and Session
 // ==================================================
 
 static void initialize_desktop() {
-    // Desktop is initially disabled.
+    // Start signed out.
+    // This must happen BEFORE somebody logs in,
+    // not while they're enjoying their desktop.
+    Desktop::SessionController::initialize();
+
+    Serial::write(
+        "[DESKTOP] Session controller initialized\n"
+    );
+
+    // Desktop stays disabled until explicitly enabled.
     //
-    // Once AstralFS supports persistent config,
-    // load saved desktop preferences here.
+    // When persistent AstralFS config is available,
+    // restore saved preferences here.
     Desktop::initialize_preferences({
         false,
         Desktop::BootMode::Terminal
@@ -364,20 +373,21 @@ static void launch_desktop_test() {
         "[DESKTOP] Starting development session\n"
     );
 
-    // Enable for the current boot only.
-    // This does NOT save a boot preference.
+    // This only enables Desktop preferences.
+    // It does NOT authenticate the user.
     Desktop::enable();
 
-    // The session returns when the user
-    // exits Desktop using Escape or launcher.
+    // The new Desktop::run() requires a real,
+    // authenticated session. If there isn't one,
+    // it will refuse to launch instead of inventing one.
     Desktop::run();
 
     Serial::write(
         "[DESKTOP] Graphical session ended\n"
     );
 
-    // Restore terminal graphics after the
-    // Desktop has occupied the framebuffer.
+    // The Desktop has been occupying the framebuffer.
+    // Put the console furniture back where we found it.
     Console::initialize();
     Console::scroll_to_bottom();
 }
@@ -398,9 +408,9 @@ void kernel_main(BootInfo* bootInfo) {
     Serial::write(
         "\n"
         "========================================\n"
-        " AstralOS v0.0.7-alpha\n"
+        " AstralOS v0.0.8-alpha\n"
         " Architecture: x86-64\n"
-        " Graphical Desktop development\n"
+        " Graphical Desktop integration\n"
         "========================================\n"
     );
 
@@ -437,6 +447,18 @@ void kernel_main(BootInfo* bootInfo) {
 
     Serial::write(
         "[BOOT] Framebuffer initialized\n"
+    );
+
+    // Tell our new Desktop how big the screen is.
+    // Otherwise the renderer is just drawing
+    // into the philosophical concept of a monitor.
+    Desktop::set_display_size(
+        Graphics::width(),
+        Graphics::height()
+    );
+
+    Serial::write(
+        "[DESKTOP] Framebuffer dimensions registered\n"
     );
 
     // ------------------------------------------
@@ -619,7 +641,7 @@ void kernel_main(BootInfo* bootInfo) {
     );
 
     // ------------------------------------------
-    // Stage 14: Desktop or terminal
+    // Stage 14: Optional Desktop test
     // ------------------------------------------
 
     if (DESKTOP_BOOT_TEST) {
@@ -634,13 +656,16 @@ void kernel_main(BootInfo* bootInfo) {
         "[TERMINAL] Starting AstralOS terminal\n"
     );
 
-    // Preserve:
+    // Keep all the existing stuff:
     // - Root account creation
     // - Root authentication
     // - HPT / User terminal modes
     // - ast commands
     // - AstralFS
     // - System Settings
+    //
+    // The Desktop is new.
+    // We are not sacrificing the terminal to the GUI gods.
 
     Terminal::run();
 
