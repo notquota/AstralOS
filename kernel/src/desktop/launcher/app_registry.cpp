@@ -1,4 +1,3 @@
-
 #include "app_registry.h"
 
 namespace Astral::Desktop::AppRegistry {
@@ -19,8 +18,10 @@ static Application applications[] = {
     {5, "About AstralOS", "apps_about",
         Category::System, true, false},
 
-    {6, "Calculator", "apps_calculator",
-        Category::Utilities, false, false}
+    // Calculator has been evicted.
+    // Firefox's unemployed cousin has moved in.
+    {6, "Browser", "apps_browser",
+        Category::Utilities, true, false}
 };
 
 static constexpr uint32_t COUNT =
@@ -28,7 +29,7 @@ static constexpr uint32_t COUNT =
 
 void initialize() {
     for (uint32_t i = 0; i < COUNT; ++i) {
-        applications[i].available = i < 5;
+        applications[i].available = true;
         applications[i].pinned = i < 4;
     }
 }

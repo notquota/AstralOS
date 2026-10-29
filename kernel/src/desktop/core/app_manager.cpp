@@ -1,4 +1,3 @@
-
 #include "app_manager.h"
 #include "session_controller.h"
 
@@ -11,6 +10,7 @@
 #include "../apps/files/file_manager.h"
 #include "../apps/system_monitor/system_monitor.h"
 #include "../apps/about/about_app.h"
+#include "../apps/browser/browser_app.h"
 
 namespace Astral::Desktop::AppManager {
 
@@ -62,6 +62,11 @@ void initialize_app(uint32_t appId) {
             Apps::AboutApp::initialize();
             break;
 
+        case 6:
+            // The Browser finally has a birth certificate.
+            Apps::BrowserApp::initialize();
+            break;
+
         default:
             break;
     }
@@ -80,6 +85,11 @@ Windows::Rect default_bounds(uint32_t appId) {
         case 3:
             width = 650;
             height = 400;
+            break;
+
+        case 6:
+            width = 800;
+            height = 560;
             break;
 
         case 5:
@@ -122,8 +132,6 @@ void initialize() {
 }
 
 Windows::WindowId launch(uint32_t appId) {
-    // No graphical application may launch unless
-    // an authenticated, unlocked user session exists.
     if (!SessionController::can_run_apps())
         return Windows::INVALID_WINDOW;
 
@@ -133,8 +141,8 @@ Windows::WindowId launch(uint32_t appId) {
     if (!app || !app->available)
         return Windows::INVALID_WINDOW;
 
-    // Apps currently use shared singleton state,
-    // so only one window per application is allowed.
+    // The apps are singletons for now.
+    // Multiple copies would start a custody battle.
     Instance* existing = find_app(appId);
 
     if (existing) {
@@ -229,17 +237,24 @@ bool dispatch(
             Windows::WindowState::Minimized)
         return false;
 
-    // Only the focused app receives keyboard input.
+    // Keyboard input belongs to the focused app.
+    // Not whichever window screams loudest.
     if (action.type ==
         InputManager::ActionType::ForwardKey) {
         if (event.type != Events::Type::KeyDown ||
             Windows::focused() != instance->windowId)
             return false;
 
+        if (instance->appId == 6)
+            return Apps::BrowserApp::handle_key(
+                static_cast<char>(event.value)
+            );
+
         if (instance->appId == 3) {
             Apps::TerminalApp::handle_key(
                 static_cast<char>(event.value)
             );
+
             return true;
         }
 
@@ -270,8 +285,8 @@ bool dispatch(
         InputManager::ActionType::ForwardMouse)
         return false;
 
-    // Application widgets activate on button release,
-    // preventing duplicate actions on mouse-down.
+    // Click on release.
+    // Double-activating buttons is for villains.
     if (event.type != Events::Type::MouseUp)
         return false;
 
@@ -311,6 +326,13 @@ bool dispatch(
                     return false;
             }
         }
+
+        case 6:
+            return Apps::BrowserApp::click(
+                client,
+                event.x,
+                event.y
+            );
 
         case 4:
             return Apps::SystemMonitor::click(

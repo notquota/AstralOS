@@ -1,9 +1,9 @@
-
 #include "desktop.h"
 
 #include "core/desktop_manager.h"
 #include "core/events.h"
 #include "core/session_controller.h"
+#include "taskbar/system_status.h"
 
 #include "../drivers/keyboard.h"
 #include "../drivers/mouse.h"
@@ -68,7 +68,6 @@ void run() {
         displayHeight == 0)
         return;
 
-    // The user must already be authenticated.
     // No free HPT privileges with your wallpaper.
     if (!SessionController::can_run_apps())
         return;
@@ -86,7 +85,6 @@ void run() {
 
     desktopActive = true;
 
-    // Mouse belongs to the GUI for now.
     Mouse::set_ui_capture(true);
 
     uint64_t previousMouseRevision =
@@ -95,11 +93,24 @@ void run() {
     int32_t previousMouseX = Mouse::x();
     int32_t previousMouseY = Mouse::y();
 
+    SystemStatus::refresh();
+
+    char lastTime[16]{};
+
+    const char* initialTime =
+        SystemStatus::time_text();
+
+    for (int i = 0;
+         i < 15 && initialTime[i];
+         ++i) {
+        lastTime[i] = initialTime[i];
+    }
+
     DesktopManager::invalidate();
     DesktopManager::render();
 
-    // The new Desktop lives here.
-    // The old drawing loop has been evicted.
+    // The Desktop lives here now.
+    // The old loop was legally evicted.
     while (
         DesktopManager::status() !=
         DesktopManager::Status::Stopped
@@ -130,9 +141,10 @@ void run() {
         }
 
         if (Mouse::take_left_click()) {
-            // Current driver exposes click events,
-            // not a proper held/released mouse state.
-            // So dragging still needs driver work.
+            // The driver currently hands us
+            // a finished click.
+            //
+            // Dragging has requested a refund.
             send_mouse_event(
                 Events::Type::MouseDown,
                 currentX,
@@ -170,12 +182,34 @@ void run() {
             activity = true;
         }
 
+        // The RTC updates without pretending
+        // we invented a new timer interrupt.
+        SystemStatus::refresh();
+
+        const char* now =
+            SystemStatus::time_text();
+
+        bool changed = false;
+
+        for (int i = 0; i < 15; ++i) {
+            if (lastTime[i] != now[i])
+                changed = true;
+
+            lastTime[i] = now[i];
+
+            if (!now[i])
+                break;
+        }
+
+        if (changed)
+            DesktopManager::invalidate();
+
         DesktopManager::pump();
         DesktopManager::render();
 
         if (!activity) {
-            // No need to cook the CPU just because
-            // somebody is admiring their wallpaper.
+            // Please stop cooking the CPU.
+            // It has a family.
             astral_pause();
         }
     }

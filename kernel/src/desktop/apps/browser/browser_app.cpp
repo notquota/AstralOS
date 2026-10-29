@@ -1,4 +1,3 @@
-
 #include "browser_app.h"
 #include "../../graphics/image.h"
 
@@ -17,7 +16,6 @@ constexpr uint32_t URL_CAPACITY = 192;
 constexpr uint32_t HISTORY_CAPACITY = 12;
 
 Plugin activePlugin{};
-
 PageState state = PageState::Home;
 
 char address[URL_CAPACITY]{};
@@ -90,12 +88,15 @@ void add_history(const char* url) {
     }
 
     if (historyCount >= HISTORY_CAPACITY) {
-        for (uint32_t i = 1; i < HISTORY_CAPACITY; ++i)
+        for (uint32_t i = 1;
+             i < HISTORY_CAPACITY;
+             ++i) {
             copy_string(
                 history[i - 1],
                 history[i],
                 URL_CAPACITY
             );
+        }
 
         historyCount = HISTORY_CAPACITY - 1;
     }
@@ -110,7 +111,10 @@ void add_history(const char* url) {
     ++historyCount;
 }
 
-bool visit(const char* url, bool saveHistory) {
+bool visit(
+    const char* url,
+    bool saveHistory
+) {
     if (!url || !url[0])
         return false;
 
@@ -144,16 +148,12 @@ bool visit(const char* url, bool saveHistory) {
 } // namespace
 
 void initialize() {
-    // A new window, not a new universe.
+    // New window, same existential crisis.
     address[0] = '\0';
     historyCount = 0;
     historyIndex = 0;
     addressFocused = false;
-
     state = PageState::Home;
-
-    // The plugin is intentionally preserved.
-    // Reopening the window shouldn't uninstall it.
 }
 
 void set_plugin(const Plugin& plugin) {
@@ -171,11 +171,16 @@ bool navigate(const char* url) {
 }
 
 bool back() {
-    if (historyCount == 0 || historyIndex == 0)
+    if (historyCount == 0 ||
+        historyIndex == 0)
         return false;
 
     --historyIndex;
-    return visit(history[historyIndex], false);
+
+    return visit(
+        history[historyIndex],
+        false
+    );
 }
 
 bool forward() {
@@ -184,7 +189,11 @@ bool forward() {
         return false;
 
     ++historyIndex;
-    return visit(history[historyIndex], false);
+
+    return visit(
+        history[historyIndex],
+        false
+    );
 }
 
 void reload() {
@@ -228,14 +237,15 @@ bool handle_key(char key) {
     if (key == '\n' || key == '\r') {
         addressFocused = false;
 
-        // Don't mistake a local home page
-        // for a functioning network stack.
+        // The Enter key has requested the internet.
+        // The network stack hasn't RSVP'd.
         navigate(address);
         return true;
     }
 
     if (key >= 32 && key <= 126 &&
         n + 1 < URL_CAPACITY) {
+
         address[n] = key;
         address[n + 1] = '\0';
         return true;
@@ -292,6 +302,7 @@ bool click(
     }
 
     addressFocused = inside(urlBox, x, y);
+
     return true;
 }
 
@@ -336,15 +347,19 @@ void render(const Windows::Rect& area) {
     };
 
     Image::rectangle(
-        urlBox.x, urlBox.y,
-        urlBox.width, urlBox.height,
+        urlBox.x,
+        urlBox.y,
+        urlBox.width,
+        urlBox.height,
         addressFocused ? 0x34456A : INPUT_BG
     );
 
     Image::text(
         urlBox.x + 10,
         urlBox.y + 13,
-        address[0] ? address : "Enter a URL...",
+        address[0]
+            ? address
+            : "Enter a URL...",
         address[0] ? WHITE : MUTED
     );
 
@@ -355,11 +370,10 @@ void render(const Windows::Rect& area) {
         area.height - 84
     };
 
-    if (content.width <= 0 || content.height <= 0)
+    if (content.width <= 0 ||
+        content.height <= 0)
         return;
 
-    // If something actually knows how to browse,
-    // let it prove it.
     if (state == PageState::Loaded &&
         activePlugin.render) {
         activePlugin.render(content);
@@ -388,8 +402,11 @@ void render(const Windows::Rect& area) {
         PURPLE
     );
 
-    const char* message = "Ready for plugin installation.";
-    const char* detail = "Firefox engine not installed.";
+    const char* message =
+        "Ready for plugin installation.";
+
+    const char* detail =
+        "Firefox engine not installed.";
 
     switch (state) {
         case PageState::Home:
@@ -415,7 +432,8 @@ void render(const Windows::Rect& area) {
         case PageState::Error:
             message = "Navigation failed";
             detail = "The plugin declined.";
-            //just like my relationship with my gf :(
+            // The website has rejected us.
+            // Just like my last job interview.
             break;
 
         case PageState::Loaded:

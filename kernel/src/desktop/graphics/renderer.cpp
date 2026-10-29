@@ -1,4 +1,3 @@
-
 #include "renderer.h"
 
 #include "wallpaper.h"
@@ -7,7 +6,10 @@
 #include "../windows/window_manager.h"
 #include "../windows/decorations.h"
 
+#include "../widgets/desktop_tiles.h"
+
 #include "../taskbar/taskbar.h"
+#include "../taskbar/top_status_bar.h"
 #include "../launcher/launcher.h"
 
 #include "../apps/files/file_manager.h"
@@ -15,16 +17,13 @@
 #include "../apps/terminal/terminal_app.h"
 #include "../apps/system_monitor/system_monitor.h"
 #include "../apps/about/about_app.h"
+#include "../apps/browser/browser_app.h"
 
 namespace Astral::Desktop::Renderer {
 
 namespace {
 
-Configuration current{
-    true,
-    true,
-    true
-};
+Configuration current{true, true, true};
 
 const Image::Bitmap* cursorBitmap = nullptr;
 
@@ -33,33 +32,23 @@ int32_t cursorY = 0;
 
 bool cursorDrawn = false;
 
-void draw_desktop_icons() {
-    // Desktop launch shortcuts are independent
-    // from the application windows.
-    constexpr uint32_t apps[] = {1, 2, 3, 4, 5};
+constexpr int32_t CURSOR_SIZE = 28;
 
-    for (uint32_t i = 0; i < 5; ++i) {
-        const int32_t x = 20;
-        const int32_t y =
-            26 + static_cast<int32_t>(i) * 99;
+// A PNG is now responsible for showing
+// where the mouse is. Terrifying promotion.
+void draw_cursor() {
+    if (!cursorBitmap || !cursorBitmap->rgba)
+        return;
 
-        Icons::draw_app(apps[i], x + 7, y, 52);
+    Image::draw_overlay(
+        *cursorBitmap,
+        cursorX,
+        cursorY,
+        CURSOR_SIZE,
+        CURSOR_SIZE
+    );
 
-        const char* label = "Application";
-
-        switch (apps[i]) {
-            case 1: label = "Files"; break;
-            case 2: label = "Settings"; break;
-            case 3: label = "Terminal"; break;
-            case 4: label = "Monitor"; break;
-            case 5: label = "About"; break;
-        }
-
-        Image::text(
-            x + 7, y + 62,
-            label, 0xEDF1FF
-        );
-    }
+    cursorDrawn = true;
 }
 
 void draw_app(const Windows::Window& window) {
@@ -90,6 +79,11 @@ void draw_app(const Windows::Window& window) {
             Apps::AboutApp::render(client);
             break;
 
+        case 6:
+            // Firefox's waiting room is open.
+            Apps::BrowserApp::render(client);
+            break;
+
         default:
             Image::rectangle(
                 client.x, client.y,
@@ -107,10 +101,12 @@ void draw_app(const Windows::Window& window) {
     }
 }
 
+// Z-order is just social status for rectangles.
 void draw_windows() {
-    // Insertion-sort a small fixed list by z-order.
-    // Do not mutate the WindowManager's own array.
-    const Windows::Window* sorted[Windows::MAX_WINDOWS]{};
+    const Windows::Window* sorted[
+        Windows::MAX_WINDOWS
+    ]{};
+
     uint32_t total = 0;
 
     for (uint32_t i = 0; i < Windows::count(); ++i) {
@@ -123,11 +119,16 @@ void draw_windows() {
                 Windows::WindowState::Minimized)
             continue;
 
+        if (total >= Windows::MAX_WINDOWS)
+            break;
+
         uint32_t position = total;
 
-        while (position > 0 &&
-               sorted[position - 1]->zOrder >
-               window->zOrder) {
+        while (
+            position > 0 &&
+            sorted[position - 1]->zOrder >
+                window->zOrder
+        ) {
             sorted[position] = sorted[position - 1];
             --position;
         }
@@ -142,20 +143,7 @@ void draw_windows() {
     }
 }
 
-void draw_cursor() {
-    if (!cursorBitmap || !cursorBitmap->rgba)
-        return;
-
-    Image::draw_overlay(
-        *cursorBitmap,
-        cursorX, cursorY,
-        24, 24
-    );
-
-    cursorDrawn = true;
-}
-
-}
+} // namespace
 
 void initialize() {
     current = {true, true, true};
@@ -166,7 +154,9 @@ void initialize() {
     cursorDrawn = false;
 }
 
-void set_configuration(const Configuration& config) {
+void set_configuration(
+    const Configuration& config
+) {
     current = config;
 }
 
@@ -186,15 +176,19 @@ void compose() {
     if (!width || !height)
         return;
 
+    // Wallpaper gets the ground floor.
     if (current.showWallpaper) {
         Wallpaper::render(width, height);
     } else {
         Image::clear(0x091225);
     }
 
+    // The cubes finally occupy their
+    // actual clickable coordinates.
     if (current.showDesktopIcons)
-        draw_desktop_icons();
+        Widgets::DesktopTiles::render();
 
+    // Windows get priority over desktop cubes.
     draw_windows();
 
     if (current.showTaskbar) {
@@ -208,10 +202,17 @@ void compose() {
         static_cast<int32_t>(width),
         static_cast<int32_t>(height)
     );
+
+    // The top bar has established
+    // a tiny authoritarian government.
+    TopStatusBar::render(
+        static_cast<int32_t>(width)
+    );
 }
 
 void present() {
     Image::present();
+
     cursorDrawn = false;
     draw_cursor();
 }
@@ -226,9 +227,11 @@ void move_cursor(
     int32_t newY
 ) {
     if (cursorDrawn) {
-        // Restore only the old cursor footprint.
         Image::present_rect(
-            cursorX, cursorY, 24, 24
+            cursorX,
+            cursorY,
+            CURSOR_SIZE,
+            CURSOR_SIZE
         );
     }
 
@@ -238,4 +241,4 @@ void move_cursor(
     draw_cursor();
 }
 
-}
+} // namespace Astral::Desktop::Renderer

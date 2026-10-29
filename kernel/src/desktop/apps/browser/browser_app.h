@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <stdint.h>
@@ -22,7 +21,9 @@ struct Plugin {
     bool (*navigate)(const char* url) = nullptr;
     void (*reload)() = nullptr;
     void (*stop)() = nullptr;
-    void (*render)(const Windows::Rect& area) = nullptr;
+    void (*render)(
+        const Windows::Rect& area
+    ) = nullptr;
     void (*poll)() = nullptr;
 };
 
@@ -32,14 +33,20 @@ void set_plugin(const Plugin& plugin);
 bool plugin_available();
 
 void render(const Windows::Rect& area);
-bool click(const Windows::Rect& area, int32_t x, int32_t y);
+
+bool click(
+    const Windows::Rect& area,
+    int32_t x,
+    int32_t y
+);
+
 bool handle_key(char key);
 
 bool navigate(const char* url);
 bool back();
 bool forward();
-void reload();
 
+void reload();
 void poll();
 
 const char* current_url();

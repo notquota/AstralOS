@@ -1,4 +1,3 @@
-
 #include "desktop_tiles.h"
 
 #include "../graphics/image.h"
@@ -10,9 +9,9 @@ namespace Astral::Desktop::Widgets::DesktopTiles {
 
 namespace {
 
-// Each cube knows its purpose.
-// Most of them, anyway.
-
+// Six applications.
+// Two functioning brain cells.
+// One operating system.
 struct Tile {
     uint32_t appId;
     const char* name;
@@ -20,13 +19,13 @@ struct Tile {
     bool available;
 };
 
-constexpr int32_t TILE_WIDTH = 102;
-constexpr int32_t TILE_HEIGHT = 112;
-constexpr int32_t TILE_GAP = 14;
+constexpr int32_t TILE_WIDTH = 128;
+constexpr int32_t TILE_HEIGHT = 132;
+constexpr int32_t TILE_GAP = 18;
 constexpr int32_t TILE_MARGIN_X = 24;
-constexpr int32_t TILE_MARGIN_Y = 26;
+constexpr int32_t TILE_MARGIN_Y = 56;
 
-constexpr int32_t ICON_SIZE = 62;
+constexpr int32_t ICON_SIZE = 76;
 
 constexpr uint32_t BACKGROUND = 0x1D2A43;
 constexpr uint32_t HOVER_COLOR = 0x344C73;
@@ -36,42 +35,12 @@ constexpr uint32_t TEXT_COLOR = 0xEDF2FF;
 constexpr uint32_t DISABLED_COLOR = 0x8C9AB2;
 
 Tile tiles[] = {
-    {
-        1,
-        "Files",
-        &Assets::apps_files,
-        true
-    },
-    {
-        2,
-        "Settings",
-        &Assets::apps_settings,
-        true
-    },
-    {
-        3,
-        "Terminal",
-        &Assets::apps_terminal,
-        true
-    },
-    {
-        4,
-        "Monitor",
-        &Assets::apps_system_monitor,
-        true
-    },
-    {
-        5,
-        "About",
-        &Assets::apps_about,
-        true
-    },
-    {
-        6,
-        "Browser",
-        nullptr,
-        true
-    }
+    {1, "Files", &Assets::apps_files, true},
+    {2, "Settings", &Assets::apps_settings, true},
+    {3, "Terminal", &Assets::apps_terminal, true},
+    {4, "Monitor", &Assets::apps_system_monitor, true},
+    {5, "About", &Assets::apps_about, true},
+    {6, "Browser", nullptr, true}
 };
 
 constexpr uint32_t TILE_COUNT =
@@ -79,7 +48,6 @@ constexpr uint32_t TILE_COUNT =
 
 int32_t screenWidth = 1024;
 int32_t screenHeight = 768;
-
 int32_t hoveredTile = -1;
 
 struct Rect {
@@ -90,8 +58,6 @@ struct Rect {
 };
 
 Rect bounds_for(uint32_t index) {
-    // Three columns.
-    // Because two felt lonely.
     const int32_t column =
         static_cast<int32_t>(index % 3);
 
@@ -111,14 +77,16 @@ Rect bounds_for(uint32_t index) {
 }
 
 bool contains(
-    const Rect& rect,
+    const Rect& r,
     int32_t x,
     int32_t y
 ) {
-    return x >= rect.x &&
-           y >= rect.y &&
-           x < rect.x + rect.width &&
-           y < rect.y + rect.height;
+    return x >= r.x &&
+           y >= r.y &&
+           static_cast<int64_t>(x) <
+               static_cast<int64_t>(r.x) + r.width &&
+           static_cast<int64_t>(y) <
+               static_cast<int64_t>(r.y) + r.height;
 }
 
 void border(
@@ -156,9 +124,8 @@ bool blocked_by_window(
     int32_t x,
     int32_t y
 ) {
-    // We do not click through actual windows.
-    // The ghosts can wait.
-
+    // No clicking through windows.
+    // We aren't running a paranormal simulator.
     for (uint32_t i = 0;
          i < Windows::count();
          ++i) {
@@ -186,7 +153,8 @@ int32_t hit_test(
     int32_t x,
     int32_t y
 ) {
-    if (x < 0 || y < 0 ||
+    // Top status bar owns these pixels.
+    if (x < 0 || y < 34 ||
         x >= screenWidth ||
         y >= screenHeight)
         return -1;
@@ -194,10 +162,7 @@ int32_t hit_test(
     if (blocked_by_window(x, y))
         return -1;
 
-    for (uint32_t i = 0;
-         i < TILE_COUNT;
-         ++i) {
-
+    for (uint32_t i = 0; i < TILE_COUNT; ++i) {
         if (contains(bounds_for(i), x, y))
             return static_cast<int32_t>(i);
     }
@@ -213,7 +178,6 @@ void render_browser_placeholder(
 
     const int32_t y = r.y + 10;
 
-    // Browser is still locked in the future.
     Image::rectangle(
         x, y,
         ICON_SIZE, ICON_SIZE,
@@ -239,15 +203,14 @@ void render_tile(uint32_t index) {
     const Rect r = bounds_for(index);
 
     const bool hovered =
-        hoveredTile == static_cast<int32_t>(index);
+        hoveredTile ==
+        static_cast<int32_t>(index);
 
-    // An actual square with an actual boundary.
-    // Revolutionary.
+    // The cube has noticed the cursor.
+    // Please remain calm.
     Image::rectangle(
-        r.x,
-        r.y,
-        r.width,
-        r.height,
+        r.x, r.y,
+        r.width, r.height,
         hovered ? HOVER_COLOR : BACKGROUND
     );
 
@@ -256,7 +219,6 @@ void render_tile(uint32_t index) {
         hovered ? HOVER_BORDER : BORDER_COLOR
     );
 
-    // Very small fake depth effect.
     Image::rectangle(
         r.x + 4,
         r.y + 4,
@@ -277,37 +239,22 @@ void render_tile(uint32_t index) {
         render_browser_placeholder(r);
     }
 
-    // Our font is 6 pixels per character.
-    // Centering is not a mystical operation.
     uint32_t length = 0;
 
-    while (tile.name[length] &&
-           length < 24)
+    while (tile.name[length] && length < 24)
         ++length;
 
     const int32_t textWidth =
         static_cast<int32_t>(length * 6);
 
-    const int32_t textX =
-        r.x + (r.width - textWidth) / 2;
-
     Image::text(
-        textX,
-        r.y + 85,
+        r.x + (r.width - textWidth) / 2,
+        r.y + 103,
         tile.name,
         tile.available
             ? TEXT_COLOR
             : DISABLED_COLOR
     );
-
-    if (!tile.available) {
-        Image::text(
-            r.x + 35,
-            r.y + 99,
-            "SOON",
-            DISABLED_COLOR
-        );
-    }
 }
 
 } // namespace
@@ -350,10 +297,7 @@ uint32_t click(
 
     const Tile& tile = tiles[index];
 
-    if (!tile.available)
-        return 0;
-
-    return tile.appId;
+    return tile.available ? tile.appId : 0;
 }
 
 } // namespace Astral::Desktop::Widgets::DesktopTiles

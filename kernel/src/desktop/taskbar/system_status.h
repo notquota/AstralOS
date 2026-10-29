@@ -1,5 +1,5 @@
-
 #pragma once
+
 #include <stdint.h>
 
 namespace Astral::Desktop::SystemStatus {
@@ -30,7 +30,6 @@ void refresh();
 Battery battery();
 Clock clock();
 
-// The returned strings are stored internally.
 const char* time_text();
 const char* battery_text();
 

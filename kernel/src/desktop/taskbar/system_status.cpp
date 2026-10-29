@@ -1,6 +1,8 @@
 
 #include "system_status.h"
 
+#include "system_status.h"
+
 #include "../../drivers/rtc/rtc.h"
 #include "../../config/settings.h"
 
@@ -21,6 +23,7 @@ static void two_digits(
     out[0] = static_cast<char>(
         '0' + (value / 10) % 10
     );
+
     out[1] = static_cast<char>(
         '0' + value % 10
     );
@@ -42,18 +45,28 @@ static void format_time() {
     if (Config::get().use24HourClock) {
         two_digits(timeBuffer, hour);
         timeBuffer[2] = ':';
-        two_digits(timeBuffer + 3, currentClock.minute);
+        two_digits(
+            timeBuffer + 3,
+            currentClock.minute
+        );
+
         timeBuffer[5] = '\0';
     } else {
         const bool pm = hour >= 12;
 
         hour %= 12;
+
         if (hour == 0)
             hour = 12;
 
         two_digits(timeBuffer, hour);
+
         timeBuffer[2] = ':';
-        two_digits(timeBuffer + 3, currentClock.minute);
+
+        two_digits(
+            timeBuffer + 3,
+            currentClock.minute
+        );
 
         timeBuffer[5] = ' ';
         timeBuffer[6] = pm ? 'P' : 'A';
@@ -71,7 +84,8 @@ static void format_battery() {
         return;
     }
 
-    const uint32_t percent = currentBattery.percent;
+    const uint32_t percent =
+        currentBattery.percent;
 
     uint32_t index = 0;
 
@@ -81,10 +95,14 @@ static void format_battery() {
         batteryBuffer[index++] = '0';
     } else if (percent >= 10) {
         batteryBuffer[index++] =
-            static_cast<char>('0' + percent / 10);
+            static_cast<char>(
+                '0' + percent / 10
+            );
 
         batteryBuffer[index++] =
-            static_cast<char>('0' + percent % 10);
+            static_cast<char>(
+                '0' + percent % 10
+            );
     } else {
         batteryBuffer[index++] =
             static_cast<char>('0' + percent);
