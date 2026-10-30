@@ -3,6 +3,7 @@
 #include "core/desktop_manager.h"
 #include "core/events.h"
 #include "core/session_controller.h"
+
 #include "taskbar/system_status.h"
 
 #include "../drivers/keyboard.h"
@@ -44,6 +45,33 @@ void send_keyboard_event(char character) {
     DesktopManager::dispatch(event);
 }
 
+void copy_time(
+    char* target,
+    const char* source
+) {
+    uint32_t i = 0;
+
+    for (; i < 15 && source[i]; ++i)
+        target[i] = source[i];
+
+    target[i] = '\0';
+}
+
+bool same_time(
+    const char* a,
+    const char* b
+) {
+    for (uint32_t i = 0; i < 16; ++i) {
+        if (a[i] != b[i])
+            return false;
+
+        if (a[i] == '\0')
+            return true;
+    }
+
+    return true;
+}
+
 } // namespace
 
 void set_display_size(
@@ -62,13 +90,12 @@ void run() {
     if (desktopActive)
         return;
 
-    // We can't render into a framebuffer
-    // that apparently doesn't exist. Rude.
     if (displayWidth == 0 ||
         displayHeight == 0)
         return;
 
-    // No free HPT privileges with your wallpaper.
+    // The Desktop is not a free sample
+    // from the kernel privilege department.
     if (!SessionController::can_run_apps())
         return;
 
@@ -93,29 +120,39 @@ void run() {
     int32_t previousMouseX = Mouse::x();
     int32_t previousMouseY = Mouse::y();
 
+    bool previousLeftDown =
+        Mouse::left_down();
+
+    // Empty old click records.
+    // The past has no jurisdiction here.
+    Mouse::take_left_click();
+
     SystemStatus::refresh();
 
     char lastTime[16]{};
 
-    const char* initialTime =
-        SystemStatus::time_text();
-
-    for (int i = 0;
-         i < 15 && initialTime[i];
-         ++i) {
-        lastTime[i] = initialTime[i];
-    }
+    copy_time(
+        lastTime,
+        SystemStatus::time_text()
+    );
 
     DesktopManager::invalidate();
     DesktopManager::render();
 
-    // The Desktop lives here now.
-    // The old loop was legally evicted.
+    // The Desktop gets its own little universe.
+    // It is legally distinct from Microsoft Windows.
     while (
         DesktopManager::status() !=
         DesktopManager::Status::Stopped
     ) {
         bool activity = false;
+
+        // IRQ12 is disabled in our mouse driver.
+        // We now collect the mouse packets ourselves.
+        //
+        // Turns out a mouse cannot move if
+        // nobody reads what the mouse is saying.
+        Mouse::poll();
 
         const uint64_t revision =
             Mouse::revision();
@@ -123,16 +160,37 @@ void run() {
         const int32_t currentX = Mouse::x();
         const int32_t currentY = Mouse::y();
 
+        const bool leftDown =
+            Mouse::left_down();
+
         if (revision != previousMouseRevision ||
             currentX != previousMouseX ||
             currentY != previousMouseY) {
 
             previousMouseRevision = revision;
-            previousMouseX = currentX;
-            previousMouseY = currentY;
 
+            if (currentX != previousMouseX ||
+                currentY != previousMouseY) {
+
+                send_mouse_event(
+                    Events::Type::MouseMove,
+                    currentX,
+                    currentY
+                );
+
+                previousMouseX = currentX;
+                previousMouseY = currentY;
+            }
+
+            activity = true;
+        }
+
+        // Button transitioned from UP to DOWN.
+        //
+        // The window has officially been grabbed.
+        if (leftDown && !previousLeftDown) {
             send_mouse_event(
-                Events::Type::MouseMove,
+                Events::Type::MouseDown,
                 currentX,
                 currentY
             );
@@ -140,17 +198,10 @@ void run() {
             activity = true;
         }
 
-        if (Mouse::take_left_click()) {
-            // The driver currently hands us
-            // a finished click.
-            //
-            // Dragging has requested a refund.
-            send_mouse_event(
-                Events::Type::MouseDown,
-                currentX,
-                currentY
-            );
-
+        // Button transitioned from DOWN to UP.
+        //
+        // The hostage window has been released.
+        if (!leftDown && previousLeftDown) {
             send_mouse_event(
                 Events::Type::MouseUp,
                 currentX,
@@ -159,6 +210,12 @@ void run() {
 
             activity = true;
         }
+
+        previousLeftDown = leftDown;
+
+        // Clear compatibility click record so the
+        // old API doesn't build up fictional clicks.
+        Mouse::take_left_click();
 
         const int32_t wheel =
             Mouse::take_scroll();
@@ -182,34 +239,24 @@ void run() {
             activity = true;
         }
 
-        // The RTC updates without pretending
-        // we invented a new timer interrupt.
+        // The RTC clocks in.
+        // Unlike the browser engine.
         SystemStatus::refresh();
 
         const char* now =
             SystemStatus::time_text();
 
-        bool changed = false;
-
-        for (int i = 0; i < 15; ++i) {
-            if (lastTime[i] != now[i])
-                changed = true;
-
-            lastTime[i] = now[i];
-
-            if (!now[i])
-                break;
-        }
-
-        if (changed)
+        if (!same_time(lastTime, now)) {
+            copy_time(lastTime, now);
             DesktopManager::invalidate();
+        }
 
         DesktopManager::pump();
         DesktopManager::render();
 
         if (!activity) {
-            // Please stop cooking the CPU.
-            // It has a family.
+            // A single pause instruction.
+            // The CPU gets a microscopic vacation.
             astral_pause();
         }
     }
